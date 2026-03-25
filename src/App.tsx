@@ -63,9 +63,15 @@ export default function App() {
   );
 
   const toggleChannel = (id: string) => {
-    setUserChannelIds(prev => 
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    );
+    setUserChannelIds(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(i => i !== id);
+      }
+      if (prev.length >= 25) {
+        return prev; // Limit reached
+      }
+      return [...prev, id];
+    });
   };
 
   return (
@@ -262,7 +268,9 @@ export default function App() {
               <div className="p-6 border-b border-white/10 flex items-center justify-between shrink-0">
                 <div>
                   <h2 className="text-xl font-bold tracking-tight">Manage Channels</h2>
-                  <p className="text-xs text-white/40">Select the channels you want to see in your list.</p>
+                  <p className="text-xs text-white/40">
+                    Select up to 25 channels ({userChannelIds.length}/25)
+                  </p>
                 </div>
                 <button 
                   onClick={() => setIsManageMode(false)}
@@ -275,15 +283,19 @@ export default function App() {
               <div className="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar">
                 {allChannels.map(channel => {
                   const isSelected = userChannelIds.includes(channel.id);
+                  const isLimitReached = userChannelIds.length >= 25 && !isSelected;
+
                   return (
                     <div 
                       key={channel.id}
-                      onClick={() => toggleChannel(channel.id)}
+                      onClick={() => !isLimitReached && toggleChannel(channel.id)}
                       className={cn(
-                        "flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer",
+                        "flex items-center justify-between p-4 rounded-2xl border transition-all",
                         isSelected 
-                          ? "bg-white/10 border-white/20" 
-                          : "bg-white/5 border-transparent hover:bg-white/10"
+                          ? "bg-white/10 border-white/20 cursor-pointer" 
+                          : isLimitReached 
+                            ? "bg-white/[0.02] border-transparent opacity-40 cursor-not-allowed"
+                            : "bg-white/5 border-transparent hover:bg-white/10 cursor-pointer"
                       )}
                     >
                       <div className="flex items-center gap-4">
