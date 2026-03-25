@@ -90,6 +90,7 @@ function AppContent() {
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isManageMode, setIsManageMode] = useState(false);
+  const [manageSearchQuery, setManageSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'time'>('name');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
@@ -601,22 +602,39 @@ function AppContent() {
             >
               <div className="p-6 border-b border-white/10 flex items-center justify-between shrink-0">
                 <div>
-                  <h2 className="text-xl font-bold tracking-tight">Manage Channels</h2>
+                  <h2 className="text-xl font-bold tracking-tight">Add Channels</h2>
                   <p className="text-xs text-white/40">
-                    Select up to 25 channels ({userChannelIds.length}/25)
+                    Browse by category to customize your guide ({userChannelIds.length}/25)
                   </p>
                 </div>
                 <button 
-                  onClick={() => setIsManageMode(false)}
+                  onClick={() => {
+                    setIsManageMode(false);
+                    setManageSearchQuery('');
+                  }}
                   className="p-2 bg-white/5 hover:bg-white/10 rounded-full transition-all"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
+              {/* Search in Modal */}
+              <div className="px-6 py-4 bg-white/[0.02] border-b border-white/10 shrink-0">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                  <input 
+                    type="text" 
+                    placeholder="Search channels..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-white/30 transition-all"
+                    value={manageSearchQuery}
+                    onChange={(e) => setManageSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
               {/* Category Filter in Modal */}
               <div className="px-6 py-4 bg-white/[0.02] border-b border-white/10 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
-                {categories.map(cat => (
+                {categories.filter(c => c !== 'Now Playing Movies').map(cat => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
@@ -634,7 +652,8 @@ function AppContent() {
 
               <div className="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar">
                 {allChannels
-                  .filter(c => selectedCategory === 'All' || c.category === selectedCategory)
+                  .filter(c => (selectedCategory === 'All' || c.category === selectedCategory) && 
+                               (manageSearchQuery === '' || c.name.toLowerCase().includes(manageSearchQuery.toLowerCase())))
                   .map(channel => {
                     const isSelected = userChannelIds.includes(channel.id);
                   const isLimitReached = userChannelIds.length >= 25 && !isSelected;
