@@ -1,17 +1,69 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { format, isWithinInterval } from 'date-fns';
 import { Channel, Program } from './types';
 import { getMockChannels } from './mockData';
 import { cn } from './lib/utils';
-import { Search, Calendar, Info, Clock, Play, ChevronRight, Menu, Plus, X, Check, Settings } from 'lucide-react';
+import { Search, Calendar, Info, Clock, Play, ChevronRight, Menu, Plus, X, Check, Settings, LogIn, LogOut, User as UserIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth, signInWithGoogle, signOut, db, handleFirestoreError, OperationType } from './firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 
-export default function App() {
+// Error Boundary Component
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = { hasError: false, error: null };
+  public props: ErrorBoundaryProps;
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.props = props;
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen bg-[#0a0a0a] text-white p-6 text-center">
+          <h1 className="text-2xl font-bold mb-4">Something went wrong</h1>
+          <p className="text-white/60 mb-8 max-w-md">
+            {this.state.error?.message.startsWith('{') 
+              ? "A database error occurred. Please try again later." 
+              : this.state.error?.message || "An unexpected error occurred."}
+          </p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="bg-white text-black px-6 py-2 rounded-full font-bold"
+          >
+            Reload App
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function AppContent() {
   const [allChannels, setAllChannels] = useState<Channel[]>([]);
-  const [userChannelIds, setUserChannelIds] = useState<string[]>(() => {
-    const saved = localStorage.getItem('myFreeview_channels');
-    return saved ? JSON.parse(saved) : ['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5'];
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [userChannelIds, setUserChannelIds] = useState<string[]>(['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,6 +82,48 @@ export default function App() {
     return () => window.removeEventListener('resize', setVh);
   }, []);
 
+  // Auth Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync with Firestore
+  useEffect(() => {
+    if (!isAuthReady || !user) {
+      // Load from local storage if not logged in
+      const saved = localStorage.getItem('myFreeview_channels');
+      if (saved) setUserChannelIds(JSON.parse(saved));
+      return;
+    }
+
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userDocRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.selectedChannelIds) {
+          setUserChannelIds(data.selectedChannelIds);
+        }
+      } else {
+        // Create initial user doc if it doesn't exist
+        const initialIds = ['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5'];
+        setDoc(userDocRef, {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+          selectedChannelIds: initialIds,
+          updatedAt: new Date().toISOString()
+        }).catch(err => handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`));
+      }
+    }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`));
+
+    return () => unsubscribe();
+  }, [user, isAuthReady]);
+
   useEffect(() => {
     setAllChannels(getMockChannels());
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -37,8 +131,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('myFreeview_channels', JSON.stringify(userChannelIds));
-  }, [userChannelIds]);
+    if (!user) {
+      localStorage.setItem('myFreeview_channels', JSON.stringify(userChannelIds));
+    }
+  }, [userChannelIds, user]);
+
+  const updateSelectedChannels = async (newIds: string[]) => {
+    setUserChannelIds(newIds);
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid), {
+          selectedChannelIds: newIds,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+      }
+    }
+  };
 
   const getCurrentProgram = (channel: Channel) => {
     return channel.programs.find(p => 
@@ -87,15 +197,11 @@ export default function App() {
   });
 
   const toggleChannel = (id: string) => {
-    setUserChannelIds(prev => {
-      if (prev.includes(id)) {
-        return prev.filter(i => i !== id);
-      }
-      if (prev.length >= 25) {
-        return prev; // Limit reached
-      }
-      return [...prev, id];
-    });
+    const newIds = userChannelIds.includes(id)
+      ? userChannelIds.filter(i => i !== id)
+      : userChannelIds.length < 25 ? [...userChannelIds, id] : userChannelIds;
+    
+    updateSelectedChannels(newIds);
   };
 
   return (
@@ -146,6 +252,40 @@ export default function App() {
             <Settings className="w-4 h-4 text-white/70" />
             <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">Manage</span>
           </button>
+
+          {/* Login/Logout */}
+          <div className="flex items-center gap-2">
+            {user ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:flex flex-col items-end">
+                  <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Logged In</span>
+                  <span className="text-xs font-bold truncate max-w-[100px]">{user.displayName}</span>
+                </div>
+                <button 
+                  onClick={() => signOut()}
+                  className="p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-all group"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4 text-white/70 group-hover:text-white" />
+                </button>
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="" className="w-8 h-8 rounded-full border border-white/20" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center border border-white/20">
+                    <UserIcon className="w-4 h-4 text-white/40" />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button 
+                onClick={() => signInWithGoogle()}
+                className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full font-bold text-xs hover:bg-white/90 transition-all"
+              >
+                <LogIn className="w-4 h-4" />
+                <span className="hidden sm:inline">Sign In</span>
+              </button>
+            )}
+          </div>
           <div className="hidden sm:flex items-center gap-2 bg-white/5 px-4 py-2 rounded-full border border-white/10">
             <Clock className="w-4 h-4 text-white/70" />
             <span className="text-xs font-mono font-bold">{format(currentTime, 'HH:mm')}</span>
@@ -485,5 +625,13 @@ export default function App() {
         </div>
       </nav>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }

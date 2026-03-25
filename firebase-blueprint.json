@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User's profile and selected channels.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The unique identifier for the user."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The user's email address."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The user's display name."
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "The user's profile picture URL."
+        },
+        "selectedChannelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The list of channel IDs selected by the user."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The last time the user's profile was updated."
+        }
+      },
+      "required": ["uid", "email", "selectedChannelIds"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User's profile and selected channels."
+    }
+  }
+}
