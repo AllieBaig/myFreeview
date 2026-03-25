@@ -3,11 +3,24 @@ import { format, isWithinInterval } from 'date-fns';
 import { Channel, Program } from './types';
 import { getMockChannels } from './mockData';
 import { cn } from './lib/utils';
-import { Search, Calendar, Info, Clock, Play, ChevronRight, Menu, Plus, X, Check, Settings, LogIn, LogOut, User as UserIcon } from 'lucide-react';
+import { Search, Calendar, Info, Clock, Play, ChevronRight, Menu, Plus, X, Check, Settings, LogIn, LogOut, User as UserIcon, Trophy, Zap, Star, Sparkles, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, signInWithGoogle, signOut, db, handleFirestoreError, OperationType } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { Toaster, toast } from 'sonner';
+
+// Gamification Constants
+const XP_PER_WATCH = 15;
+const XP_PER_INFO = 5;
+const XP_PER_LEVEL = 100;
+
+const ACHIEVEMENTS = [
+  { id: 'early_bird', name: 'Early Bird', description: 'Check the guide before 8 AM', icon: <Clock className="w-5 h-5 text-yellow-400" /> },
+  { id: 'night_owl', name: 'Night Owl', description: 'Watch something after midnight', icon: <Star className="w-5 h-5 text-purple-400" /> },
+  { id: 'movie_buff', name: 'Movie Buff', description: 'Check details for 5 movies', icon: <Play className="w-5 h-5 text-red-400" /> },
+  { id: 'channel_surfer', name: 'Channel Surfer', description: 'Select 10 or more channels', icon: <TrendingUp className="w-5 h-5 text-blue-400" /> },
+];
 
 // Error Boundary Component
 interface ErrorBoundaryProps {
@@ -64,6 +77,15 @@ function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [userChannelIds, setUserChannelIds] = useState<string[]>(['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']);
+  const [userStats, setUserStats] = useState({
+    xp: 0,
+    level: 1,
+    streak: 0,
+    lastCheckIn: '',
+    achievements: [] as string[]
+  });
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [xpPopups, setXpPopups] = useState<{ id: number, amount: number, x: number, y: number }[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -107,6 +129,36 @@ function AppContent() {
         if (data.selectedChannelIds) {
           setUserChannelIds(data.selectedChannelIds);
         }
+        setUserStats({
+          xp: data.xp || 0,
+          level: data.level || 1,
+          streak: data.streak || 0,
+          lastCheckIn: data.lastCheckIn || '',
+          achievements: data.achievements || []
+        });
+
+        // Check for daily streak
+        const today = new Date().toDateString();
+        const last = data.lastCheckIn ? new Date(data.lastCheckIn).toDateString() : '';
+        
+        if (last !== today) {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const wasYesterday = last === yesterday.toDateString();
+          
+          const newStreak = wasYesterday ? (data.streak || 0) + 1 : 1;
+          
+          updateDoc(userDocRef, {
+            streak: newStreak,
+            lastCheckIn: new Date().toISOString(),
+            xp: increment(20) // Bonus for daily check-in
+          }).then(() => {
+            toast.success(`Daily Streak: ${newStreak} Days!`, {
+              description: "You earned 20 bonus XP!",
+              icon: <Zap className="w-5 h-5 text-yellow-400" />
+            });
+          }).catch(err => console.error("Streak update failed", err));
+        }
       } else {
         // Create initial user doc if it doesn't exist
         const initialIds = ['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5'];
@@ -116,6 +168,11 @@ function AppContent() {
           displayName: user.displayName,
           photoURL: user.photoURL,
           selectedChannelIds: initialIds,
+          xp: 0,
+          level: 1,
+          streak: 1,
+          lastCheckIn: new Date().toISOString(),
+          achievements: [],
           updatedAt: new Date().toISOString()
         }).catch(err => handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`));
       }
@@ -135,6 +192,66 @@ function AppContent() {
       localStorage.setItem('myFreeview_channels', JSON.stringify(userChannelIds));
     }
   }, [userChannelIds, user]);
+
+  const awardXP = async (amount: number, e?: React.MouseEvent) => {
+    if (!user) return;
+
+    // Add visual popup
+    if (e) {
+      const id = Date.now();
+      setXpPopups(prev => [...prev, { id, amount, x: e.clientX, y: e.clientY }]);
+      setTimeout(() => setXpPopups(prev => prev.filter(p => p.id !== id)), 1000);
+    }
+
+    const newXp = userStats.xp + amount;
+    const newLevel = Math.floor(newXp / XP_PER_LEVEL) + 1;
+    
+    const updates: any = {
+      xp: increment(amount),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (newLevel > userStats.level) {
+      updates.level = newLevel;
+      toast.success(`Level Up!`, {
+        description: `Welcome to Level ${newLevel}!`,
+        icon: <Sparkles className="w-6 h-6 text-yellow-400" />
+      });
+    }
+
+    // Check for achievements
+    const hour = new Date().getHours();
+    const newAchievements = [...userStats.achievements];
+    let earned = false;
+
+    if (hour < 8 && !newAchievements.includes('early_bird')) {
+      newAchievements.push('early_bird');
+      earned = true;
+    }
+    if (hour >= 0 && hour < 4 && !newAchievements.includes('night_owl')) {
+      newAchievements.push('night_owl');
+      earned = true;
+    }
+    if (userChannelIds.length >= 10 && !newAchievements.includes('channel_surfer')) {
+      newAchievements.push('channel_surfer');
+      earned = true;
+    }
+
+    if (earned) {
+      updates.achievements = newAchievements;
+      const latest = ACHIEVEMENTS.find(a => a.id === newAchievements[newAchievements.length - 1]);
+      toast.success(`Achievement Earned!`, {
+        description: latest?.name,
+        icon: <Trophy className="w-6 h-6 text-yellow-400" />
+      });
+    }
+
+    try {
+      await updateDoc(doc(db, 'users', user.uid), updates);
+    } catch (err) {
+      console.error("XP update failed", err);
+    }
+  };
 
   const updateSelectedChannels = async (newIds: string[]) => {
     setUserChannelIds(newIds);
@@ -257,6 +374,30 @@ function AppContent() {
           <div className="flex items-center gap-2">
             {user ? (
               <div className="flex items-center gap-3">
+                {/* Level & Streak */}
+                <div className="hidden sm:flex items-center gap-4 mr-2">
+                  <div className="flex flex-col items-end">
+                    <div className="flex items-center gap-1 text-yellow-400">
+                      <Zap className="w-3 h-3 fill-current" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">{userStats.streak} Day Streak</span>
+                    </div>
+                    <div className="w-24 h-1.5 bg-white/10 rounded-full mt-1 overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(userStats.xp % XP_PER_LEVEL)}%` }}
+                        className="h-full bg-gradient-to-r from-yellow-400 to-orange-500"
+                      />
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowAchievements(true)}
+                    className="flex flex-col items-center group"
+                  >
+                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest group-hover:text-white/60">Level</span>
+                    <span className="text-sm font-black text-white group-hover:scale-110 transition-transform">{userStats.level}</span>
+                  </button>
+                </div>
+
                 <div className="hidden sm:flex flex-col items-end">
                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Logged In</span>
                   <span className="text-xs font-bold truncate max-w-[100px]">{user.displayName}</span>
@@ -269,9 +410,17 @@ function AppContent() {
                   <LogOut className="w-4 h-4 text-white/70 group-hover:text-white" />
                 </button>
                 {user.photoURL ? (
-                  <img src={user.photoURL} alt="" className="w-8 h-8 rounded-full border border-white/20" />
+                  <img 
+                    src={user.photoURL} 
+                    alt="" 
+                    className="w-8 h-8 rounded-full border border-white/20 cursor-pointer hover:scale-110 transition-transform" 
+                    onClick={() => setShowAchievements(true)}
+                  />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center border border-white/20">
+                  <div 
+                    className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center border border-white/20 cursor-pointer hover:scale-110 transition-transform"
+                    onClick={() => setShowAchievements(true)}
+                  >
                     <UserIcon className="w-4 h-4 text-white/40" />
                   </div>
                 )}
@@ -591,11 +740,20 @@ function AppContent() {
                 </p>
 
                 <div className="flex flex-col sm:flex-row gap-4">
-                  <button className="flex-1 flex items-center justify-center gap-2 bg-white text-black font-bold py-4 rounded-2xl hover:bg-white/90 transition-all">
+                  <button 
+                    onClick={(e) => {
+                      awardXP(XP_PER_WATCH, e);
+                      // In a real app, this would open the stream
+                    }}
+                    className="flex-1 flex items-center justify-center gap-2 bg-white text-black font-bold py-4 rounded-2xl hover:bg-white/90 transition-all active:scale-95"
+                  >
                     <Play className="w-5 h-5 fill-current" />
                     Watch Now
                   </button>
-                  <button className="flex-1 flex items-center justify-center gap-2 bg-white/10 text-white font-bold py-4 rounded-2xl hover:bg-white/20 border border-white/10 transition-all">
+                  <button 
+                    onClick={(e) => awardXP(XP_PER_INFO, e)}
+                    className="flex-1 flex items-center justify-center gap-2 bg-white/10 text-white font-bold py-4 rounded-2xl hover:bg-white/20 border border-white/10 transition-all active:scale-95"
+                  >
                     <Info className="w-5 h-5" />
                     More Info
                   </button>
@@ -605,6 +763,97 @@ function AppContent() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Achievements Modal */}
+      <AnimatePresence>
+        {showAchievements && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAchievements(false)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-lg bg-[#1a1a1a] rounded-3xl overflow-hidden border border-white/10 shadow-2xl p-8"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center shadow-lg shadow-orange-500/20">
+                    <Trophy className="w-8 h-8 text-black" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black uppercase tracking-tighter">Your Progress</h2>
+                    <p className="text-white/40 text-xs font-bold uppercase tracking-widest">Level {userStats.level} • {userStats.xp} Total XP</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowAchievements(false)}
+                  className="p-2 bg-white/5 hover:bg-white/10 rounded-full transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                {ACHIEVEMENTS.map(achievement => {
+                  const isEarned = userStats.achievements.includes(achievement.id);
+                  return (
+                    <div 
+                      key={achievement.id}
+                      className={cn(
+                        "flex items-center gap-4 p-4 rounded-2xl border transition-all",
+                        isEarned ? "bg-white/10 border-white/20" : "bg-white/[0.02] border-white/5 opacity-40"
+                      )}
+                    >
+                      <div className={cn(
+                        "w-12 h-12 rounded-xl flex items-center justify-center",
+                        isEarned ? "bg-white/10" : "bg-white/5"
+                      )}>
+                        {achievement.icon}
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-sm">{achievement.name}</h3>
+                        <p className="text-xs text-white/40">{achievement.description}</p>
+                      </div>
+                      {isEarned && <Check className="w-4 h-4 text-green-400" />}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button 
+                onClick={() => setShowAchievements(false)}
+                className="w-full mt-8 bg-white text-black font-bold py-4 rounded-2xl hover:bg-white/90 transition-all"
+              >
+                Keep Surfing
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* XP Popups */}
+      <AnimatePresence>
+        {xpPopups.map(popup => (
+          <motion.div
+            key={popup.id}
+            initial={{ opacity: 1, y: popup.y - 20, x: popup.x }}
+            animate={{ opacity: 0, y: popup.y - 100 }}
+            exit={{ opacity: 0 }}
+            className="fixed z-[200] pointer-events-none text-yellow-400 font-black text-xl flex items-center gap-1 drop-shadow-lg"
+          >
+            <Sparkles className="w-4 h-4" />
+            +{popup.amount} XP
+          </motion.div>
+        ))}
+      </AnimatePresence>
+
+      <Toaster position="bottom-right" theme="dark" expand={false} richColors />
 
       {/* Footer / Tab Bar (Mobile) */}
       <nav className="md:hidden flex items-center justify-around py-4 bg-[#141414] border-t border-white/10 shrink-0">

@@ -29,6 +29,30 @@
           },
           "description": "The list of channel IDs selected by the user."
         },
+        "xp": {
+          "type": "integer",
+          "description": "The user's experience points."
+        },
+        "level": {
+          "type": "integer",
+          "description": "The user's current level."
+        },
+        "streak": {
+          "type": "integer",
+          "description": "The user's current daily streak."
+        },
+        "lastCheckIn": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The last time the user checked in."
+        },
+        "achievements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The list of achievement IDs earned by the user."
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
