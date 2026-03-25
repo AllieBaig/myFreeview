@@ -58,13 +58,33 @@ export default function App() {
     }
   });
 
-  const filteredChannels = sortedChannels.filter(channel => 
-    (selectedCategory === 'All' || channel.category === selectedCategory) &&
-    (channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-     channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase())))
-  );
+  const filteredChannels = sortedChannels.filter(channel => {
+    const currentProgram = getCurrentProgram(channel);
+    const isNowPlayingMovie = currentProgram.category === 'Movies';
+    
+    if (selectedCategory === 'Now Playing Movies') {
+      return isNowPlayingMovie && (
+        channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      );
+    }
 
-  const categories = ['All', ...new Set(allChannels.map(c => c.category))].sort();
+    return (selectedCategory === 'All' || channel.category === selectedCategory) &&
+      (channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+       channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase())));
+  });
+
+  const categories: string[] = [
+    'All', 
+    'Now Playing Movies',
+    ...(Array.from(new Set(allChannels.map(c => c.category))) as string[])
+  ].sort((a, b) => {
+    if (a === 'All') return -1;
+    if (b === 'All') return 1;
+    if (a === 'Now Playing Movies') return -1;
+    if (b === 'Now Playing Movies') return 1;
+    return a.localeCompare(b);
+  });
 
   const toggleChannel = (id: string) => {
     setUserChannelIds(prev => {
