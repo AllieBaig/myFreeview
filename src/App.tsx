@@ -17,6 +17,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isManageMode, setIsManageMode] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'time'>('name');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
   // iOS Viewport Height Fix
   useEffect(() => {
@@ -58,9 +59,12 @@ export default function App() {
   });
 
   const filteredChannels = sortedChannels.filter(channel => 
-    channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    (selectedCategory === 'All' || channel.category === selectedCategory) &&
+    (channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+     channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase())))
   );
+
+  const categories = ['All', ...new Set(allChannels.map(c => c.category))].sort();
 
   const toggleChannel = (id: string) => {
     setUserChannelIds(prev => {
@@ -129,6 +133,24 @@ export default function App() {
         </div>
       </header>
 
+      {/* Category Filter Bar */}
+      <div className="bg-[#141414] border-b border-white/10 px-4 md:px-6 py-3 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
+        {categories.map(cat => (
+          <button
+            key={cat}
+            onClick={() => setSelectedCategory(cat)}
+            className={cn(
+              "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all border",
+              selectedCategory === cat 
+                ? "bg-white text-black border-white" 
+                : "bg-white/5 text-white/40 border-white/10 hover:text-white hover:border-white/30"
+            )}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
       {/* Mobile Search & Sort Bar */}
       <div className="md:hidden px-4 py-3 bg-[#141414] border-b border-white/10 space-y-3">
         <div className="relative">
@@ -195,7 +217,10 @@ export default function App() {
                         className="w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl object-cover border border-white/10 group-hover:border-white/30 transition-all"
                         referrerPolicy="no-referrer"
                       />
-                      <span className="font-bold text-sm md:text-base tracking-tight">{channel.name}</span>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-sm md:text-base tracking-tight">{channel.name}</span>
+                        <span className="text-[10px] uppercase tracking-widest text-white/30 font-bold">{channel.category}</span>
+                      </div>
                     </div>
 
                     {/* Column 2: Time (Mobile: Inline with show) */}
@@ -280,9 +305,29 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Category Filter in Modal */}
+              <div className="px-6 py-4 bg-white/[0.02] border-b border-white/10 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
+                {categories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={cn(
+                      "px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all border",
+                      selectedCategory === cat 
+                        ? "bg-white text-black border-white" 
+                        : "bg-white/5 text-white/40 border-white/10 hover:text-white hover:border-white/30"
+                    )}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
               <div className="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar">
-                {allChannels.map(channel => {
-                  const isSelected = userChannelIds.includes(channel.id);
+                {allChannels
+                  .filter(c => selectedCategory === 'All' || c.category === selectedCategory)
+                  .map(channel => {
+                    const isSelected = userChannelIds.includes(channel.id);
                   const isLimitReached = userChannelIds.length >= 25 && !isSelected;
 
                   return (
@@ -305,7 +350,10 @@ export default function App() {
                           className="w-10 h-10 rounded-xl object-cover border border-white/10"
                           referrerPolicy="no-referrer"
                         />
-                        <span className="font-bold">{channel.name}</span>
+                        <div className="flex flex-col">
+                          <span className="font-bold">{channel.name}</span>
+                          <span className="text-[9px] uppercase tracking-widest text-white/30 font-bold">{channel.category}</span>
+                        </div>
                       </div>
                       <div className={cn(
                         "w-6 h-6 rounded-full flex items-center justify-center transition-all border",
