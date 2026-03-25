@@ -16,6 +16,7 @@ export default function App() {
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isManageMode, setIsManageMode] = useState(false);
+  const [sortBy, setSortBy] = useState<'name' | 'time'>('name');
 
   // iOS Viewport Height Fix
   useEffect(() => {
@@ -38,9 +39,25 @@ export default function App() {
     localStorage.setItem('myFreeview_channels', JSON.stringify(userChannelIds));
   }, [userChannelIds]);
 
+  const getCurrentProgram = (channel: Channel) => {
+    return channel.programs.find(p => 
+      isWithinInterval(currentTime, { start: p.start, end: p.end })
+    ) || channel.programs[0];
+  };
+
   const myChannels = allChannels.filter(c => userChannelIds.includes(c.id));
   
-  const filteredChannels = myChannels.filter(channel => 
+  const sortedChannels = [...myChannels].sort((a, b) => {
+    if (sortBy === 'name') {
+      return a.name.localeCompare(b.name);
+    } else {
+      const progA = getCurrentProgram(a);
+      const progB = getCurrentProgram(b);
+      return progA.start.getTime() - progB.start.getTime();
+    }
+  });
+
+  const filteredChannels = sortedChannels.filter(channel => 
     channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()))
   );
@@ -49,12 +66,6 @@ export default function App() {
     setUserChannelIds(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
-  };
-
-  const getCurrentProgram = (channel: Channel) => {
-    return channel.programs.find(p => 
-      isWithinInterval(currentTime, { start: p.start, end: p.end })
-    ) || channel.programs[0];
   };
 
   return (
@@ -78,6 +89,26 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4">
+          <div className="hidden lg:flex items-center bg-white/5 rounded-full p-1 border border-white/10">
+            <button 
+              onClick={() => setSortBy('name')}
+              className={cn(
+                "px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                sortBy === 'name' ? "bg-white text-black" : "text-white/40 hover:text-white"
+              )}
+            >
+              A-Z
+            </button>
+            <button 
+              onClick={() => setSortBy('time')}
+              className={cn(
+                "px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                sortBy === 'time' ? "bg-white text-black" : "text-white/40 hover:text-white"
+              )}
+            >
+              Time
+            </button>
+          </div>
           <button 
             onClick={() => setIsManageMode(true)}
             className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-full border border-white/10 hover:bg-white/10 transition-all"
@@ -92,8 +123,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Mobile Search Bar */}
-      <div className="md:hidden px-4 py-3 bg-[#141414] border-b border-white/10">
+      {/* Mobile Search & Sort Bar */}
+      <div className="md:hidden px-4 py-3 bg-[#141414] border-b border-white/10 space-y-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
           <input 
@@ -103,6 +134,29 @@ export default function App() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Sort By</span>
+          <div className="flex items-center bg-white/5 rounded-full p-1 border border-white/10">
+            <button 
+              onClick={() => setSortBy('name')}
+              className={cn(
+                "px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                sortBy === 'name' ? "bg-white text-black" : "text-white/40"
+              )}
+            >
+              A-Z
+            </button>
+            <button 
+              onClick={() => setSortBy('time')}
+              className={cn(
+                "px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                sortBy === 'time' ? "bg-white text-black" : "text-white/40"
+              )}
+            >
+              Time
+            </button>
+          </div>
         </div>
       </div>
 
