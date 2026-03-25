@@ -1,0 +1,5 @@
+{
+  "name": "UK TV Guide",
+  "description": "A comprehensive UK TV guide with real-time schedules, channel listings, and program details.",
+  "requestFramePermissions": []
+}
