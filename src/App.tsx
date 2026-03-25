@@ -13,10 +13,8 @@ const CHANNEL_LIST_WIDTH = 120;
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [startTime, setStartTime] = useState(startOfHour(new Date()));
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setChannels(getMockChannels());
@@ -24,31 +22,17 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const timeSlots = Array.from({ length: 24 }).map((_, i) => addHours(startTime, i));
-
   const filteredChannels = channels.filter(channel => 
     channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const handleScroll = (direction: 'left' | 'right') => {
-    if (scrollRef.current) {
-      const scrollAmount = direction === 'left' ? -HOUR_WIDTH * 2 : HOUR_WIDTH * 2;
-      scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-    }
+  // Helper to find the current program for a channel
+  const getCurrentProgram = (channel: Channel) => {
+    return channel.programs.find(p => 
+      isWithinInterval(currentTime, { start: p.start, end: p.end })
+    ) || channel.programs[0]; // Fallback to first if none active (e.g. late night)
   };
-
-  const getProgramWidth = (program: Program) => {
-    const duration = differenceInMinutes(program.end, program.start);
-    return (duration / 60) * HOUR_WIDTH;
-  };
-
-  const getProgramOffset = (program: Program) => {
-    const offset = differenceInMinutes(program.start, startTime);
-    return (offset / 60) * HOUR_WIDTH;
-  };
-
-  const nowOffset = (differenceInMinutes(currentTime, startTime) / 60) * HOUR_WIDTH;
 
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0a] text-white font-sans overflow-hidden">
@@ -56,7 +40,7 @@ export default function App() {
       <header className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#141414] z-50">
         <div className="flex items-center gap-4">
           <Menu className="w-6 h-6 text-white/70 cursor-pointer hover:text-white" />
-          <h1 className="text-xl font-bold tracking-tighter text-white">TV24</h1>
+          <h1 className="text-xl font-bold tracking-tighter text-white">myFreeview</h1>
         </div>
         
         <div className="flex-1 max-w-md mx-8 relative">
@@ -82,116 +66,67 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 relative overflow-hidden flex flex-col">
-        {/* Time Header */}
-        <div className="flex bg-[#141414] border-b border-white/10 sticky top-0 z-40">
-          <div className="w-[120px] shrink-0 border-r border-white/10 flex items-center justify-center bg-[#141414]">
-            <span className="text-[10px] uppercase tracking-widest font-bold text-white/40">Channels</span>
+      {/* Main Content - 3 Column List View */}
+      <main className="flex-1 overflow-y-auto bg-[#0a0a0a]">
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          {/* Table Header */}
+          <div className="grid grid-cols-[200px_150px_1fr] gap-4 px-6 py-4 bg-[#141414] rounded-t-2xl border border-white/10 text-[10px] uppercase tracking-widest font-bold text-white/40">
+            <div>Channel</div>
+            <div>Time</div>
+            <div>Show Name</div>
           </div>
-          <div className="flex-1 overflow-hidden relative">
-            <div className="flex" style={{ width: `${24 * HOUR_WIDTH}px` }}>
-              {timeSlots.map((time, i) => (
+
+          {/* Channel Rows */}
+          <div className="border-x border-b border-white/10 rounded-b-2xl overflow-hidden divide-y divide-white/5">
+            {filteredChannels.map(channel => {
+              const currentProgram = getCurrentProgram(channel);
+              return (
                 <div 
-                  key={i} 
-                  className="shrink-0 border-r border-white/5 py-3 px-4 text-xs font-mono text-white/60"
-                  style={{ width: `${HOUR_WIDTH}px` }}
+                  key={channel.id} 
+                  className="grid grid-cols-[200px_150px_1fr] gap-4 px-6 py-6 items-center hover:bg-white/5 transition-colors cursor-pointer group"
+                  onClick={() => setSelectedProgram(currentProgram)}
                 >
-                  {format(time, 'HH:mm')}
+                  {/* Column 1: Channel */}
+                  <div className="flex items-center gap-4">
+                    <img 
+                      src={channel.logo} 
+                      alt={channel.name} 
+                      className="w-12 h-12 rounded-xl object-cover border border-white/10 group-hover:border-white/30 transition-all"
+                      referrerPolicy="no-referrer"
+                    />
+                    <span className="font-bold text-sm tracking-tight">{channel.name}</span>
+                  </div>
+
+                  {/* Column 2: Time */}
+                  <div className="flex items-center gap-2 text-sm font-mono text-white/60">
+                    <span className="bg-white/5 px-2 py-1 rounded border border-white/5">
+                      {format(currentProgram.start, 'HH:mm')}
+                    </span>
+                    <span className="text-white/20">-</span>
+                    <span className="bg-white/5 px-2 py-1 rounded border border-white/5">
+                      {format(currentProgram.end, 'HH:mm')}
+                    </span>
+                  </div>
+
+                  {/* Column 3: Show Name */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex flex-col">
+                      <span className="font-bold text-base group-hover:text-white transition-colors">
+                        {currentProgram.title}
+                      </span>
+                      <span className="text-xs text-white/40 line-clamp-1">
+                        {currentProgram.description}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[8px] font-black bg-red-500 text-white px-1.5 py-0.5 rounded uppercase">Live</span>
+                      <ChevronRight className="w-4 h-4 text-white/20 group-hover:text-white/60 transition-all" />
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
-        </div>
-
-        {/* Scrollable Guide */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Channel List (Sticky) */}
-          <div className="w-[120px] shrink-0 bg-[#141414] border-r border-white/10 z-30 overflow-y-auto no-scrollbar">
-            {filteredChannels.map(channel => (
-              <div 
-                key={channel.id} 
-                className="h-[80px] flex flex-col items-center justify-center p-2 border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                <img 
-                  src={channel.logo} 
-                  alt={channel.name} 
-                  className="w-10 h-10 rounded-lg mb-1 object-cover grayscale hover:grayscale-0 transition-all"
-                  referrerPolicy="no-referrer"
-                />
-                <span className="text-[10px] font-bold text-white/60 text-center truncate w-full">{channel.name}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Programs Grid */}
-          <div 
-            ref={scrollRef}
-            className="flex-1 overflow-auto relative scroll-smooth"
-          >
-            {/* Now Indicator */}
-            <div 
-              className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-20 pointer-events-none"
-              style={{ left: `${nowOffset}px` }}
-            >
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
-            </div>
-
-            <div className="relative" style={{ width: `${24 * HOUR_WIDTH}px` }}>
-              {filteredChannels.map(channel => (
-                <div key={channel.id} className="h-[80px] border-b border-white/5 relative group">
-                  {channel.programs.map(program => {
-                    const width = getProgramWidth(program);
-                    const left = getProgramOffset(program);
-                    const isLive = isWithinInterval(currentTime, { start: program.start, end: program.end });
-
-                    return (
-                      <div
-                        key={program.id}
-                        className={cn(
-                          "absolute top-1 bottom-1 rounded-md p-3 cursor-pointer transition-all border border-white/5 overflow-hidden",
-                          isLive ? "bg-white/10 border-white/20" : "bg-white/5 hover:bg-white/10",
-                          selectedProgram?.id === program.id && "ring-2 ring-white/50 bg-white/20"
-                        )}
-                        style={{ left: `${left}px`, width: `${width - 4}px` }}
-                        onClick={() => setSelectedProgram(program)}
-                      >
-                        <div className="flex flex-col h-full justify-between">
-                          <div className="flex items-start justify-between gap-2">
-                            <h3 className="text-xs font-bold truncate leading-tight">{program.title}</h3>
-                            {isLive && (
-                              <span className="shrink-0 text-[8px] font-black bg-red-500 text-white px-1 rounded uppercase animate-pulse">Live</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-[10px] text-white/40 font-mono">
-                            <span>{format(program.start, 'HH:mm')}</span>
-                            <span>-</span>
-                            <span>{format(program.end, 'HH:mm')}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation Controls */}
-        <div className="absolute bottom-6 right-6 flex gap-2 z-50">
-          <button 
-            onClick={() => handleScroll('left')}
-            className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 transition-all"
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-          <button 
-            onClick={() => handleScroll('right')}
-            className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md border border-white/10 transition-all"
-          >
-            <ChevronRight className="w-6 h-6" />
-          </button>
         </div>
       </main>
 

@@ -1,6 +1,6 @@
 {
-  "short_name": "TV Guide",
-  "name": "UK TV Guide",
+  "short_name": "myFreeview",
+  "name": "myFreeview",
   "icons": [
     {
       "src": "https://picsum.photos/seed/tvguide/192/192",
