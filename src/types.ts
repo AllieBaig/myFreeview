@@ -11,6 +11,7 @@ export interface Program {
 export interface Channel {
   id: string;
   name: string;
+  number: number;
   logo: string;
   category: string;
   programs: Program[];

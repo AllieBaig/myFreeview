@@ -77,6 +77,7 @@ function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [userChannelIds, setUserChannelIds] = useState<string[]>(['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']);
+  const [customChannelNumbers, setCustomChannelNumbers] = useState<Record<string, number>>({});
   const [userStats, setUserStats] = useState({
     xp: 0,
     level: 1,
@@ -91,7 +92,7 @@ function AppContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isManageMode, setIsManageMode] = useState(false);
   const [manageSearchQuery, setManageSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'name' | 'time'>('name');
+  const [sortBy, setSortBy] = useState<'name' | 'number'>('number');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
   // iOS Viewport Height Fix
@@ -129,6 +130,9 @@ function AppContent() {
         const data = snapshot.data();
         if (data.selectedChannelIds) {
           setUserChannelIds(data.selectedChannelIds);
+        }
+        if (data.customChannelNumbers) {
+          setCustomChannelNumbers(data.customChannelNumbers);
         }
         setUserStats({
           xp: data.xp || 0,
@@ -169,6 +173,7 @@ function AppContent() {
           displayName: user.displayName,
           photoURL: user.photoURL,
           selectedChannelIds: initialIds,
+          customChannelNumbers: {},
           xp: 0,
           level: 1,
           streak: 1,
@@ -254,6 +259,24 @@ function AppContent() {
     }
   };
 
+  const updateChannelNumber = async (channelId: string, newNumber: number) => {
+    const updatedNumbers = { ...customChannelNumbers, [channelId]: newNumber };
+    setCustomChannelNumbers(updatedNumbers);
+    
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          customChannelNumbers: updatedNumbers,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+      }
+    } else {
+      localStorage.setItem('myFreeview_channelNumbers', JSON.stringify(updatedNumbers));
+    }
+  };
+
   const updateSelectedChannels = async (newIds: string[]) => {
     setUserChannelIds(newIds);
     if (user) {
@@ -274,15 +297,18 @@ function AppContent() {
     ) || channel.programs[0];
   };
 
-  const myChannels = allChannels.filter(c => userChannelIds.includes(c.id));
+  const myChannels = allChannels
+    .filter(c => userChannelIds.includes(c.id))
+    .map(c => ({
+      ...c,
+      number: customChannelNumbers[c.id] ?? c.number
+    }));
   
   const sortedChannels = [...myChannels].sort((a, b) => {
     if (sortBy === 'name') {
       return a.name.localeCompare(b.name);
     } else {
-      const progA = getCurrentProgram(a);
-      const progB = getCurrentProgram(b);
-      return progA.start.getTime() - progB.start.getTime();
+      return a.number - b.number;
     }
   });
 
@@ -437,6 +463,26 @@ function AppContent() {
             )}
           </div>
           <div className="hidden sm:flex items-center gap-2 bg-white/5 px-4 py-2 rounded-full border border-white/10">
+            <button 
+              onClick={() => setSortBy('name')}
+              className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                sortBy === 'name' ? "bg-white text-black" : "text-white/40 hover:text-white"
+              )}
+            >
+              A-Z
+            </button>
+            <button 
+              onClick={() => setSortBy('number')}
+              className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
+                sortBy === 'number' ? "bg-white text-black" : "text-white/40 hover:text-white"
+              )}
+            >
+              #
+            </button>
+          </div>
+          <div className="hidden sm:flex items-center gap-2 bg-white/5 px-4 py-2 rounded-full border border-white/10">
             <Clock className="w-4 h-4 text-white/70" />
             <span className="text-xs font-mono font-bold">{format(currentTime, 'HH:mm')}</span>
           </div>
@@ -486,13 +532,13 @@ function AppContent() {
               A-Z
             </button>
             <button 
-              onClick={() => setSortBy('time')}
+              onClick={() => setSortBy('number')}
               className={cn(
                 "px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
-                sortBy === 'time' ? "bg-white text-black" : "text-white/40"
+                sortBy === 'number' ? "bg-white text-black" : "text-white/40"
               )}
             >
-              Time
+              Number
             </button>
           </div>
         </div>
@@ -521,6 +567,11 @@ function AppContent() {
                   >
                     {/* Column 1: Channel */}
                     <div className="flex items-center gap-3 md:gap-4">
+                      <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-white/5 flex items-center justify-center border border-white/10 shrink-0">
+                        <span className="text-[10px] md:text-xs font-mono font-bold text-white/60">
+                          {channel.number}
+                        </span>
+                      </div>
                       <img 
                         src={channel.logo} 
                         alt={channel.name} 
@@ -672,6 +723,13 @@ function AppContent() {
                       )}
                     >
                       <div className="flex items-center gap-4">
+                        <input 
+                          type="number"
+                          value={customChannelNumbers[channel.id] ?? channel.number}
+                          onChange={(e) => updateChannelNumber(channel.id, parseInt(e.target.value) || 0)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-12 bg-white/10 border border-white/20 rounded-lg py-1 text-center text-xs font-mono focus:outline-none focus:border-white/40"
+                        />
                         <img 
                           src={channel.logo} 
                           alt={channel.name} 

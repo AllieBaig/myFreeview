@@ -53,6 +53,10 @@
           },
           "description": "The list of achievement IDs earned by the user."
         },
+        "customChannelNumbers": {
+          "type": "object",
+          "description": "A mapping of channel IDs to custom channel numbers."
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",

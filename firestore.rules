@@ -13,6 +13,12 @@ service cloud.firestore {
     //   - displayName: string (optional) - The user's display name.
     //   - photoURL: string (optional) - The user's profile picture URL.
     //   - selectedChannelIds: list (required) - The list of channel IDs selected by the user.
+    //   - xp: integer (optional) - The user's experience points.
+    //   - level: integer (optional) - The user's current level.
+    //   - streak: integer (optional) - The user's current daily streak.
+    //   - lastCheckIn: string (optional, date-time format) - The last time the user checked in.
+    //   - achievements: list (optional) - The list of achievement IDs earned by the user.
+    //   - customChannelNumbers: map (optional) - A mapping of channel IDs to custom channel numbers.
     //   - updatedAt: timestamp (optional) - The last time the user's profile was updated.
     //
     // ===============================================================
@@ -58,7 +64,8 @@ service cloud.firestore {
              (!('level' in data) || data.level is int) &&
              (!('streak' in data) || data.streak is int) &&
              (!('lastCheckIn' in data) || isValidDateString(data.lastCheckIn)) &&
-             (!('achievements' in data) || data.achievements is list);
+             (!('achievements' in data) || data.achievements is list) &&
+             (!('customChannelNumbers' in data) || data.customChannelNumbers is map);
     }
 
     // ===============================================================
