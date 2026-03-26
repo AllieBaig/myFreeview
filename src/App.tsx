@@ -70,17 +70,40 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 function AppContent() {
+  // Safe LocalStorage Helper
+  const safeStorage = {
+    get: (key: string, fallback: any) => {
+      try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : fallback;
+      } catch (e) {
+        console.error(`LocalStorage get error for ${key}`, e);
+        return fallback;
+      }
+    },
+    set: (key: string, value: any) => {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (e) {
+        console.error(`LocalStorage set error for ${key}`, e);
+        if (e instanceof Error && e.name === 'QuotaExceededError') {
+          toast.error("Storage Full", { description: "Please clear some browser data." });
+        }
+      }
+    }
+  };
+
   const [allChannels, setAllChannels] = useState<Channel[]>([]);
-  const [userChannelIds, setUserChannelIds] = useState<string[]>(['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']);
-  const [favoriteChannelIds, setFavoriteChannelIds] = useState<string[]>([]);
-  const [customChannelNumbers, setCustomChannelNumbers] = useState<Record<string, number>>({});
-  const [userStats, setUserStats] = useState({
+  const [userChannelIds, setUserChannelIds] = useState<string[]>(() => safeStorage.get('myFreeview_channels', ['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']));
+  const [favoriteChannelIds, setFavoriteChannelIds] = useState<string[]>(() => safeStorage.get('myFreeview_favorites', []));
+  const [customChannelNumbers, setCustomChannelNumbers] = useState<Record<string, number>>(() => safeStorage.get('myFreeview_channelNumbers', {}));
+  const [userStats, setUserStats] = useState(() => safeStorage.get('myFreeview_stats', {
     xp: 0,
     level: 1,
     streak: 0,
     lastCheckIn: '',
     achievements: [] as string[]
-  });
+  }));
   const [showAchievements, setShowAchievements] = useState(false);
   const [xpPopups, setXpPopups] = useState<{ id: number, amount: number, x: number, y: number }[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -90,7 +113,7 @@ function AppContent() {
   const [manageSearchQuery, setManageSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'number'>('number');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('myFreeview_theme') as 'light' | 'dark') || 'dark');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [isSavingOffline, setIsSavingOffline] = useState(false);
 
@@ -140,64 +163,23 @@ function AppContent() {
     return () => window.removeEventListener('resize', setVh);
   }, []);
 
-  // Safe LocalStorage Helper
-  const safeStorage = {
-    get: (key: string, fallback: any) => {
-      try {
-        const item = localStorage.getItem(key);
-        return item ? JSON.parse(item) : fallback;
-      } catch (e) {
-        console.error(`LocalStorage get error for ${key}`, e);
-        return fallback;
-      }
-    },
-    set: (key: string, value: any) => {
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-      } catch (e) {
-        console.error(`LocalStorage set error for ${key}`, e);
-        if (e instanceof Error && e.name === 'QuotaExceededError') {
-          toast.error("Storage Full", { description: "Please clear some browser data." });
-        }
-      }
-    }
-  };
-
-  // Load User Data
+  // Load User Data (Streak Check Only)
   useEffect(() => {
-    const savedChannels = safeStorage.get('myFreeview_channels', ['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']);
-    const savedFavorites = safeStorage.get('myFreeview_favorites', []);
-    const savedNumbers = safeStorage.get('myFreeview_channelNumbers', {});
-    const savedTheme = localStorage.getItem('myFreeview_theme') as 'light' | 'dark' || 'dark';
-    const savedStats = safeStorage.get('myFreeview_stats', {
-      xp: 0,
-      level: 1,
-      streak: 0,
-      lastCheckIn: '',
-      achievements: []
-    });
-
-    setUserChannelIds(savedChannels);
-    setFavoriteChannelIds(savedFavorites);
-    setCustomChannelNumbers(savedNumbers);
-    setTheme(savedTheme);
-    setUserStats(savedStats);
-
     // Check for daily streak
     const today = new Date().toDateString();
-    const last = savedStats.lastCheckIn ? new Date(savedStats.lastCheckIn).toDateString() : '';
+    const last = userStats.lastCheckIn ? new Date(userStats.lastCheckIn).toDateString() : '';
     
     if (last !== today) {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const wasYesterday = last === yesterday.toDateString();
       
-      const newStreak = wasYesterday ? (savedStats.streak || 0) + 1 : 1;
+      const newStreak = wasYesterday ? (userStats.streak || 0) + 1 : 1;
       const newStats = {
-        ...savedStats,
+        ...userStats,
         streak: newStreak,
         lastCheckIn: new Date().toISOString(),
-        xp: savedStats.xp + 20
+        xp: userStats.xp + 20
       };
       
       setUserStats(newStats);
@@ -308,7 +290,7 @@ function AppContent() {
     setCustomChannelNumbers(updatedNumbers);
   };
 
-  const toggleTheme = async () => {
+  const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(newTheme);
     localStorage.setItem('myFreeview_theme', newTheme);
