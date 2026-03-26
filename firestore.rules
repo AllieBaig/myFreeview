@@ -65,7 +65,8 @@ service cloud.firestore {
              (!('streak' in data) || data.streak is int) &&
              (!('lastCheckIn' in data) || isValidDateString(data.lastCheckIn)) &&
              (!('achievements' in data) || data.achievements is list) &&
-             (!('customChannelNumbers' in data) || data.customChannelNumbers is map);
+             (!('customChannelNumbers' in data) || data.customChannelNumbers is map) &&
+             (!('theme' in data) || data.theme in ['light', 'dark']);
     }
 
     // ===============================================================

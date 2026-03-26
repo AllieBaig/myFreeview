@@ -57,6 +57,11 @@
           "type": "object",
           "description": "A mapping of channel IDs to custom channel numbers."
         },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark"],
+          "description": "The user's preferred theme."
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
