@@ -3,11 +3,8 @@ import { format, isWithinInterval } from 'date-fns';
 import { Channel, Program } from './types';
 import { getMockChannels } from './mockData';
 import { cn } from './lib/utils';
-import { Search, Calendar, Info, Clock, Play, ChevronRight, Menu, Plus, X, Check, Settings, LogIn, LogOut, User as UserIcon, Trophy, Zap, Star, Sparkles, TrendingUp, Sun, Moon } from 'lucide-react';
+import { Search, Calendar, Info, Clock, Play, ChevronRight, Menu, Plus, X, Check, Settings, User as UserIcon, Trophy, Zap, Star, Sparkles, TrendingUp, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, signInWithGoogle, signOut, db, handleFirestoreError, OperationType } from './firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, getDoc, updateDoc, increment } from 'firebase/firestore';
 import { Toaster, toast } from 'sonner';
 
 // Gamification Constants
@@ -74,9 +71,8 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
 function AppContent() {
   const [allChannels, setAllChannels] = useState<Channel[]>([]);
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
   const [userChannelIds, setUserChannelIds] = useState<string[]>(['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']);
+  const [favoriteChannelIds, setFavoriteChannelIds] = useState<string[]>([]);
   const [customChannelNumbers, setCustomChannelNumbers] = useState<Record<string, number>>({});
   const [userStats, setUserStats] = useState({
     xp: 0,
@@ -144,92 +140,92 @@ function AppContent() {
     return () => window.removeEventListener('resize', setVh);
   }, []);
 
-  // Auth Listener
+  // Safe LocalStorage Helper
+  const safeStorage = {
+    get: (key: string, fallback: any) => {
+      try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : fallback;
+      } catch (e) {
+        console.error(`LocalStorage get error for ${key}`, e);
+        return fallback;
+      }
+    },
+    set: (key: string, value: any) => {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (e) {
+        console.error(`LocalStorage set error for ${key}`, e);
+        if (e instanceof Error && e.name === 'QuotaExceededError') {
+          toast.error("Storage Full", { description: "Please clear some browser data." });
+        }
+      }
+    }
+  };
+
+  // Load User Data
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsAuthReady(true);
+    const savedChannels = safeStorage.get('myFreeview_channels', ['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5']);
+    const savedFavorites = safeStorage.get('myFreeview_favorites', []);
+    const savedNumbers = safeStorage.get('myFreeview_channelNumbers', {});
+    const savedTheme = localStorage.getItem('myFreeview_theme') as 'light' | 'dark' || 'dark';
+    const savedStats = safeStorage.get('myFreeview_stats', {
+      xp: 0,
+      level: 1,
+      streak: 0,
+      lastCheckIn: '',
+      achievements: []
     });
-    return () => unsubscribe();
+
+    setUserChannelIds(savedChannels);
+    setFavoriteChannelIds(savedFavorites);
+    setCustomChannelNumbers(savedNumbers);
+    setTheme(savedTheme);
+    setUserStats(savedStats);
+
+    // Check for daily streak
+    const today = new Date().toDateString();
+    const last = savedStats.lastCheckIn ? new Date(savedStats.lastCheckIn).toDateString() : '';
+    
+    if (last !== today) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const wasYesterday = last === yesterday.toDateString();
+      
+      const newStreak = wasYesterday ? (savedStats.streak || 0) + 1 : 1;
+      const newStats = {
+        ...savedStats,
+        streak: newStreak,
+        lastCheckIn: new Date().toISOString(),
+        xp: savedStats.xp + 20
+      };
+      
+      setUserStats(newStats);
+      safeStorage.set('myFreeview_stats', newStats);
+      
+      toast.success(`Daily Streak: ${newStreak} Days!`, {
+        description: "You earned 20 bonus XP!",
+        icon: <Zap className="w-5 h-5 text-yellow-400" />
+      });
+    }
   }, []);
 
-  // Sync with Firestore
+  // Persist User Data
   useEffect(() => {
-    if (!isAuthReady || !user) {
-      // Load from local storage if not logged in
-      const saved = localStorage.getItem('myFreeview_channels');
-      if (saved) setUserChannelIds(JSON.parse(saved));
-      const savedTheme = localStorage.getItem('myFreeview_theme');
-      if (savedTheme === 'light' || savedTheme === 'dark') setTheme(savedTheme);
-      return;
-    }
+    safeStorage.set('myFreeview_channels', userChannelIds);
+  }, [userChannelIds]);
 
-    const userDocRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userDocRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.selectedChannelIds) {
-          setUserChannelIds(data.selectedChannelIds);
-        }
-        if (data.customChannelNumbers) {
-          setCustomChannelNumbers(data.customChannelNumbers);
-        }
-        if (data.theme) {
-          setTheme(data.theme);
-        }
-        setUserStats({
-          xp: data.xp || 0,
-          level: data.level || 1,
-          streak: data.streak || 0,
-          lastCheckIn: data.lastCheckIn || '',
-          achievements: data.achievements || []
-        });
+  useEffect(() => {
+    safeStorage.set('myFreeview_favorites', favoriteChannelIds);
+  }, [favoriteChannelIds]);
 
-        // Check for daily streak
-        const today = new Date().toDateString();
-        const last = data.lastCheckIn ? new Date(data.lastCheckIn).toDateString() : '';
-        
-        if (last !== today) {
-          const yesterday = new Date();
-          yesterday.setDate(yesterday.getDate() - 1);
-          const wasYesterday = last === yesterday.toDateString();
-          
-          const newStreak = wasYesterday ? (data.streak || 0) + 1 : 1;
-          
-          updateDoc(userDocRef, {
-            streak: newStreak,
-            lastCheckIn: new Date().toISOString(),
-            xp: increment(20) // Bonus for daily check-in
-          }).then(() => {
-            toast.success(`Daily Streak: ${newStreak} Days!`, {
-              description: "You earned 20 bonus XP!",
-              icon: <Zap className="w-5 h-5 text-yellow-400" />
-            });
-          }).catch(err => console.error("Streak update failed", err));
-        }
-      } else {
-        // Create initial user doc if it doesn't exist
-        const initialIds = ['bbc1', 'bbc2', 'itv1', 'ch4', 'ch5'];
-        setDoc(userDocRef, {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
-          photoURL: user.photoURL,
-          selectedChannelIds: initialIds,
-          customChannelNumbers: {},
-          theme: 'dark',
-          xp: 0,
-          level: 1,
-          streak: 1,
-          lastCheckIn: new Date().toISOString(),
-          achievements: [],
-          updatedAt: new Date().toISOString()
-        }).catch(err => handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`));
-      }
-    }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`));
+  useEffect(() => {
+    safeStorage.set('myFreeview_channelNumbers', customChannelNumbers);
+  }, [customChannelNumbers]);
 
-    return () => unsubscribe();
-  }, [user, isAuthReady]);
+  useEffect(() => {
+    safeStorage.set('myFreeview_stats', userStats);
+  }, [userStats]);
 
   useEffect(() => {
     const loadData = () => {
@@ -253,15 +249,7 @@ function AppContent() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!user) {
-      localStorage.setItem('myFreeview_channels', JSON.stringify(userChannelIds));
-    }
-  }, [userChannelIds, user]);
-
   const awardXP = async (amount: number, e?: React.MouseEvent) => {
-    if (!user) return;
-
     // Add visual popup
     if (e) {
       const id = Date.now();
@@ -272,24 +260,11 @@ function AppContent() {
     const newXp = userStats.xp + amount;
     const newLevel = Math.floor(newXp / XP_PER_LEVEL) + 1;
     
-    const updates: any = {
-      xp: increment(amount),
-      updatedAt: new Date().toISOString()
-    };
-
-    if (newLevel > userStats.level) {
-      updates.level = newLevel;
-      toast.success(`Level Up!`, {
-        description: `Welcome to Level ${newLevel}!`,
-        icon: <Sparkles className="w-6 h-6 text-yellow-400" />
-      });
-    }
+    let newAchievements = [...userStats.achievements];
+    let earned = false;
 
     // Check for achievements
     const hour = new Date().getHours();
-    const newAchievements = [...userStats.achievements];
-    let earned = false;
-
     if (hour < 8 && !newAchievements.includes('early_bird')) {
       newAchievements.push('early_bird');
       earned = true;
@@ -304,7 +279,6 @@ function AppContent() {
     }
 
     if (earned) {
-      updates.achievements = newAchievements;
       const latest = ACHIEVEMENTS.find(a => a.id === newAchievements[newAchievements.length - 1]);
       toast.success(`Achievement Earned!`, {
         description: latest?.name,
@@ -312,47 +286,45 @@ function AppContent() {
       });
     }
 
-    try {
-      await updateDoc(doc(db, 'users', user.uid), updates);
-    } catch (err) {
-      console.error("XP update failed", err);
+    const updatedStats = {
+      ...userStats,
+      xp: newXp,
+      level: newLevel,
+      achievements: newAchievements
+    };
+
+    setUserStats(updatedStats);
+
+    if (newLevel > userStats.level) {
+      toast.success(`Level Up!`, {
+        description: `Welcome to Level ${newLevel}!`,
+        icon: <Sparkles className="w-6 h-6 text-yellow-400" />
+      });
     }
   };
 
   const updateChannelNumber = async (channelId: string, newNumber: number) => {
     const updatedNumbers = { ...customChannelNumbers, [channelId]: newNumber };
     setCustomChannelNumbers(updatedNumbers);
-    
-    if (user) {
-      try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          customChannelNumbers: updatedNumbers,
-          updatedAt: new Date().toISOString()
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
-      }
-    } else {
-      localStorage.setItem('myFreeview_channelNumbers', JSON.stringify(updatedNumbers));
-    }
   };
 
   const toggleTheme = async () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(newTheme);
-    
-    if (user) {
-      try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          theme: newTheme,
-          updatedAt: new Date().toISOString()
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+    localStorage.setItem('myFreeview_theme', newTheme);
+  };
+
+  const toggleFavorite = (channelId: string) => {
+    setFavoriteChannelIds(prev => {
+      const isFav = prev.includes(channelId);
+      if (isFav) {
+        toast.info("Removed from Favorites");
+        return prev.filter(id => id !== channelId);
+      } else {
+        toast.success("Added to Favorites", { icon: <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" /> });
+        return [...prev, channelId];
       }
-    } else {
-      localStorage.setItem('myFreeview_theme', newTheme);
-    }
+    });
   };
 
   const saveForOffline = async () => {
@@ -380,16 +352,6 @@ function AppContent() {
 
   const updateSelectedChannels = async (newIds: string[]) => {
     setUserChannelIds(newIds);
-    if (user) {
-      try {
-        await setDoc(doc(db, 'users', user.uid), {
-          selectedChannelIds: newIds,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
-      }
-    }
   };
 
   const getCurrentProgram = (channel: Channel) => {
@@ -416,7 +378,15 @@ function AppContent() {
   const filteredChannels = sortedChannels.filter(channel => {
     const currentProgram = getCurrentProgram(channel);
     const isNowPlayingMovie = currentProgram.category === 'Movies';
+    const isFavorite = favoriteChannelIds.includes(channel.id);
     
+    if (selectedCategory === 'Favorites') {
+      return isFavorite && (
+        channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        channel.programs.some(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      );
+    }
+
     if (selectedCategory === 'Now Playing Movies') {
       return isNowPlayingMovie && (
         channel.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -431,11 +401,14 @@ function AppContent() {
 
   const categories: string[] = [
     'All', 
+    'Favorites',
     'Now Playing Movies',
     ...(Array.from(new Set(allChannels.map(c => c.category))) as string[])
   ].sort((a, b) => {
     if (a === 'All') return -1;
     if (b === 'All') return 1;
+    if (a === 'Favorites') return -1;
+    if (b === 'Favorites') return 1;
     if (a === 'Now Playing Movies') return -1;
     if (b === 'Now Playing Movies') return 1;
     return a.localeCompare(b);
@@ -486,13 +459,13 @@ function AppContent() {
               A-Z
             </button>
             <button 
-              onClick={() => setSortBy('time')}
+              onClick={() => setSortBy('number')}
               className={cn(
                 "px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
-                sortBy === 'time' ? "bg-black dark:bg-white text-white dark:text-black" : "text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white"
+                sortBy === 'number' ? "bg-black dark:bg-white text-white dark:text-black" : "text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white"
               )}
             >
-              Time
+              Number
             </button>
           </div>
           <button 
@@ -503,70 +476,40 @@ function AppContent() {
             <span className="hidden sm:inline text-xs font-bold uppercase tracking-wider">Manage</span>
           </button>
 
-          {/* Login/Logout */}
+          {/* User Stats */}
           <div className="flex items-center gap-2">
-            {user ? (
-              <div className="flex items-center gap-3">
-                {/* Level & Streak */}
-                <div className="hidden sm:flex items-center gap-4 mr-2">
-                  <div className="flex flex-col items-end">
-                    <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-400">
-                      <Zap className="w-3 h-3 fill-current" />
-                      <span className="text-[10px] font-black uppercase tracking-widest">{userStats.streak} Day Streak</span>
-                    </div>
-                    <div className="w-24 h-1.5 bg-black/10 dark:bg-white/10 rounded-full mt-1 overflow-hidden">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${(userStats.xp % XP_PER_LEVEL)}%` }}
-                        className="h-full bg-gradient-to-r from-yellow-400 to-orange-500"
-                      />
-                    </div>
+            <div className="flex items-center gap-3">
+              {/* Level & Streak */}
+              <div className="hidden sm:flex items-center gap-4 mr-2">
+                <div className="flex flex-col items-end">
+                  <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-400">
+                    <Zap className="w-3 h-3 fill-current" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">{userStats.streak} Day Streak</span>
                   </div>
-                  <button 
-                    onClick={() => setShowAchievements(true)}
-                    className="flex flex-col items-center group"
-                  >
-                    <span className="text-[10px] font-bold text-black/40 dark:text-white/40 uppercase tracking-widest group-hover:text-black/60 dark:group-hover:text-white/60">Level</span>
-                    <span className="text-sm font-black text-black dark:text-white group-hover:scale-110 transition-transform">{userStats.level}</span>
-                  </button>
-                </div>
-
-                <div className="hidden sm:flex flex-col items-end">
-                  <span className="text-[10px] font-bold text-black/40 dark:text-white/40 uppercase tracking-widest">Logged In</span>
-                  <span className="text-xs font-bold truncate max-w-[100px]">{user.displayName}</span>
+                  <div className="w-24 h-1.5 bg-black/10 dark:bg-white/10 rounded-full mt-1 overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${(userStats.xp % XP_PER_LEVEL)}%` }}
+                      className="h-full bg-gradient-to-r from-yellow-400 to-orange-500"
+                    />
+                  </div>
                 </div>
                 <button 
-                  onClick={() => signOut()}
-                  className="p-2 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full border border-black/10 dark:border-white/10 transition-all group"
-                  title="Sign Out"
+                  onClick={() => setShowAchievements(true)}
+                  className="flex flex-col items-center group"
                 >
-                  <LogOut className="w-4 h-4 text-black/70 dark:text-white/70 group-hover:text-black dark:group-hover:text-white" />
+                  <span className="text-[10px] font-bold text-black/40 dark:text-white/40 uppercase tracking-widest group-hover:text-black/60 dark:group-hover:text-white/60">Level</span>
+                  <span className="text-sm font-black text-black dark:text-white group-hover:scale-110 transition-transform">{userStats.level}</span>
                 </button>
-                {user.photoURL ? (
-                  <img 
-                    src={user.photoURL} 
-                    alt="" 
-                    className="w-8 h-8 rounded-full border border-black/20 dark:border-white/20 cursor-pointer hover:scale-110 transition-transform" 
-                    onClick={() => setShowAchievements(true)}
-                  />
-                ) : (
-                  <div 
-                    className="w-8 h-8 rounded-full bg-black/10 dark:bg-white/10 flex items-center justify-center border border-black/20 dark:border-white/20 cursor-pointer hover:scale-110 transition-transform"
-                    onClick={() => setShowAchievements(true)}
-                  >
-                    <UserIcon className="w-4 h-4 text-black/40 dark:text-white/40" />
-                  </div>
-                )}
               </div>
-            ) : (
-              <button 
-                onClick={() => signInWithGoogle()}
-                className="flex items-center gap-2 bg-black dark:bg-white text-white dark:text-black px-4 py-2 rounded-full font-bold text-xs hover:bg-black/90 dark:hover:bg-white/90 transition-all shadow-sm"
+
+              <div 
+                className="w-8 h-8 rounded-full bg-black/10 dark:bg-white/10 flex items-center justify-center border border-black/20 dark:border-white/20 cursor-pointer hover:scale-110 transition-transform"
+                onClick={() => setShowAchievements(true)}
               >
-                <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">Sign In</span>
-              </button>
-            )}
+                <UserIcon className="w-4 h-4 text-black/40 dark:text-white/40" />
+              </div>
+            </div>
           </div>
           <div className="hidden sm:flex items-center gap-2 bg-black/5 dark:bg-white/5 px-4 py-2 rounded-full border border-black/10 dark:border-white/10">
             {isOffline && (
@@ -702,11 +645,27 @@ function AppContent() {
                 return (
                   <div 
                     key={channel.id} 
-                    className="grid grid-cols-1 md:grid-cols-[200px_150px_1fr] gap-2 md:gap-4 px-4 md:px-6 py-4 md:py-6 items-center hover:bg-black/[0.02] dark:hover:bg-white/5 transition-colors cursor-pointer group"
+                    className="grid grid-cols-1 md:grid-cols-[200px_150px_1fr] gap-2 md:gap-4 px-4 md:px-6 py-4 md:py-6 items-center hover:bg-black/[0.02] dark:hover:bg-white/5 transition-colors cursor-pointer group relative"
                     onClick={() => setSelectedProgram(currentProgram)}
                   >
                     {/* Column 1: Channel */}
                     <div className="flex items-center gap-3 md:gap-4">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(channel.id);
+                        }}
+                        className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-all"
+                      >
+                        <Star 
+                          className={cn(
+                            "w-4 h-4 transition-all",
+                            favoriteChannelIds.includes(channel.id) 
+                              ? "fill-yellow-400 text-yellow-400 scale-110" 
+                              : "text-black/20 dark:text-white/20 hover:text-black/40 dark:hover:text-white/40"
+                          )} 
+                        />
+                      </button>
                       <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-black/5 dark:bg-white/5 flex items-center justify-center border border-black/10 dark:border-white/10 shrink-0 transition-colors duration-300">
                         <span className="text-[10px] md:text-xs font-mono font-bold text-black/60 dark:text-white/60">
                           {channel.number}
@@ -863,6 +822,22 @@ function AppContent() {
                       )}
                     >
                       <div className="flex items-center gap-4">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFavorite(channel.id);
+                          }}
+                          className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-all"
+                        >
+                          <Star 
+                            className={cn(
+                              "w-4 h-4 transition-all",
+                              favoriteChannelIds.includes(channel.id) 
+                                ? "fill-yellow-400 text-yellow-400" 
+                                : "text-black/20 dark:text-white/20"
+                            )} 
+                          />
+                        </button>
                         <input 
                           type="number"
                           value={customChannelNumbers[channel.id] ?? channel.number}
@@ -942,6 +917,24 @@ function AppContent() {
               
               <div className="p-6 md:p-8">
                 <div className="flex items-center gap-3 mb-4 flex-wrap">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const channel = allChannels.find(c => c.programs.some(p => p.id === selectedProgram.id));
+                      if (channel) toggleFavorite(channel.id);
+                    }}
+                    className="p-2 bg-black/5 dark:bg-white/10 rounded-full border border-black/10 dark:border-white/10 transition-all hover:scale-110 active:scale-95"
+                  >
+                    <Star 
+                      className={cn(
+                        "w-4 h-4 transition-all",
+                        allChannels.find(c => c.programs.some(p => p.id === selectedProgram.id)) && 
+                        favoriteChannelIds.includes(allChannels.find(c => c.programs.some(p => p.id === selectedProgram.id))!.id)
+                          ? "fill-yellow-400 text-yellow-400" 
+                          : "text-black/40 dark:text-white/40"
+                      )} 
+                    />
+                  </button>
                   <span className="px-3 py-1 bg-black/5 dark:bg-white/10 rounded-full text-[10px] font-bold uppercase tracking-wider text-black/70 dark:text-white/70 border border-black/10 dark:border-white/10 transition-colors duration-300">
                     {selectedProgram.category}
                   </span>
